@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% from "_progress.html" import progress_bars %}
+{% block title %}{{ book.title }} – Audible Downloader{% endblock %}
+{% block refresh %}{% if status.key == 'running' %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block content %}
+  <p><a href="{{ url_for('library') }}">← Zur Bibliothek</a></p>
+  <section class="book-heading">
+    {% if book.cover_url %}<img class="detail-cover" src="{{ book.cover_url }}" alt="Cover von {{ book.title }}">{% endif %}
+    <div>
+      <h1>{{ book.title }}</h1>
+      {% if book.subtitle %}<p>{{ book.subtitle }}</p>{% endif %}
+      <dl>
+        <dt>Autor</dt><dd>{{ book.authors }}</dd>
+        {% if book.series_title %}<dt>Serie / Band</dt><dd>{{ book.series_title }}{% if book.series_sequence %}, Band {{ book.series_sequence }}{% endif %}</dd>{% endif %}
+        <dt>ASIN</dt><dd><code>{{ book.asin }}</code></dd>
+        <dt>Status</dt><dd><span class="status {{ status.key }}">{{ status.label }}</span>{% if status.current_step %} – {{ status.current_step }}{% endif %}{% if status.progress_percent is not none and status.key == 'running' %}{{ progress_bars(status.progress_percent, status.phase_label, status.phase_progress_percent, true) }}{% endif %}</dd>
+        <dt>Lautstärke</dt><dd><span class="status {{ status.normalization.key }}">{{ status.normalization.label }}</span></dd>
+      </dl>
+    </div>
+  </section>
+
+  {% if status.error_message %}<div class="notice error"><strong>Letzter Fehler:</strong> {{ status.error_message }}</div>{% endif %}
+
+  {% if status.outputs %}
+    <section>
+      <h2>Gespeicherte Ausgabedateien</h2>
+      <ul class="outputs">
+        {% for output in status.outputs %}
+          <li><code>{{ output.absolute_path }}</code> <span class="status {{ 'file_exists' if output.exists else 'history' }}">{{ 'vorhanden' if output.exists else 'fehlt' }}</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
+  <p><a class="button secondary" href="{{ url_for('link_existing_book', asin=book.asin) }}">Bestehende M4B-Dateien verknüpfen</a></p>
+
+  {% if status.all_outputs_exist %}
+    <section class="panel">
+      <h2>Vorhandene Dateien normalisieren</h2>
+      <p>Verwendet die oben gespeicherten tatsächlichen Ausgabepfade. Multipart-Dateien werden nacheinander verarbeitet.</p>
+      <form method="post" action="{{ url_for('normalize_book', asin=book.asin) }}">
+        <button type="submit" {% if status.key == 'running' %}disabled{% endif %}>Lautstärke normalisieren</button>
+      </form>
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>{% if status.has_success_history %}Erneut konvertieren{% else %}Konvertieren{% endif %}</h2>
+    <p><strong>Berechneter Standardpfad:</strong><br><code>{{ default_target }}</code></p>
+    {% if form_error %}<div class="notice error">{{ form_error }}</div>{% endif %}
+    {% if existing_targets %}
+      <div class="notice warning"><strong>Achtung:</strong> Folgende Zieldatei ist bereits vorhanden: {{ existing_targets|join(', ') }}</div>
+    {% endif %}
+    <form method="post" class="conversion-form">
+      <label>
+        <span>Zielpfad</span>
+        <input type="text" name="target_path" value="{{ target_value }}" required>
+      </label>
+      {% if status.has_success_history %}
+        <input type="hidden" name="force" value="1">
+        <p class="muted">Dieser Vorgang wird als neue Konvertierung gespeichert; frühere Einträge bleiben erhalten.</p>
+      {% endif %}
+      <label class="checkbox">
+        <input type="checkbox" name="normalize" value="1">
+        Lautstärke normalisieren
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="overwrite" value="1">
+        Vorhandene Zieldatei ausdrücklich überschreiben
+      </label>
+      <button type="submit" {% if status.key == 'running' %}disabled{% endif %}>{% if status.has_success_history %}Erneut konvertieren{% else %}Konvertieren{% endif %}</button>
+    </form>
+  </section>
+{% endblock %}

@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.audible-downloads/
+config/
+audiobooks/
+library.tsv
+*.aax
+*.aaxc
+*.voucher
+*.m4b
+*.db

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_progress.html" import progress_bars %}
+{% block title %}Jobs – Audible Downloader{% endblock %}
+{% block refresh %}{% if has_active %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <div>
+      <h1>Jobs</h1>
+      <p class="muted">Downloads und Medienverarbeitung laufen jeweils höchstens einmal gleichzeitig.</p>
+    </div>
+    <a class="button secondary" href="{{ url_for('library') }}">Zur Bibliothek</a>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Reihenfolge</th><th>Hörbuch</th><th>Jobtyp</th><th>Status</th><th>Schritt</th><th>Fortschritt</th><th>Zeitpunkt</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+          <tr>
+            <td>{{ job.queue_position if job.queue_position else '–' }}</td>
+            <td><strong><a href="{{ url_for('convert_book', asin=job.asin) }}">{{ job.title }}</a></strong><small><code>{{ job.asin }}</code> · Job {{ job.id }}</small></td>
+            <td>{{ job.type_label }}</td>
+            <td><span class="status {{ job.status }}">{{ job.status_label }}</span>{% if job.error_message %}<small class="error-text">{{ job.error_message }}</small>{% endif %}</td>
+            <td>{{ job.current_step or '–' }}</td>
+            <td>{{ progress_bars(job.progress_percent, job.phase_label, job.phase_progress_percent, job.status in ('queued', 'downloading', 'waiting_for_processing', 'processing')) }}</td>
+            <td><time datetime="{{ job.created_at }}">{{ job.created_at }}</time></td>
+            <td>
+              {% if job.status in ('queued', 'waiting_for_processing') %}
+                <form method="post" action="{{ url_for('cancel_job', job_id=job.id) }}"><button type="submit" class="secondary">Abbrechen</button></form>
+              {% elif job.status in ('completed', 'failed', 'cancelled') %}
+                <form method="post" action="{{ url_for('dismiss_job', job_id=job.id) }}"><button type="submit" class="secondary">Entfernen</button></form>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="8" class="empty">Noch keine Jobs vorhanden.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

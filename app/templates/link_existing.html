@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}M4B verknüpfen – {{ book.title }}{% endblock %}
+{% block content %}
+  <p><a href="{{ url_for('convert_book', asin=book.asin) }}">← Zurück zu {{ book.title }}</a></p>
+  <h1>Bestehende M4B-Dateien verknüpfen</h1>
+  <p>Die ausgewählten Dateien werden nur in SQLite mit diesem Hörbuch verknüpft. Ihr Inhalt und Speicherort bleiben unverändert. Die neue Auswahl ersetzt die bisher für dieses Hörbuch angezeigte Dateiliste; bei Multipart-Hörbüchern daher alle Teile auswählen.</p>
+
+  <form method="get" class="filters">
+    <label>
+      <span>Dateien filtern</span>
+      <input type="search" name="q" value="{{ query }}" placeholder="Ordner oder Dateiname">
+    </label>
+    <button type="submit">Suchen</button>
+  </form>
+
+  {% if form_error %}<div class="notice error">{{ form_error }}</div>{% endif %}
+  <form method="post" class="conversion-form">
+    {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
+    <div class="file-picker">
+      {% for file in files %}
+        <label class="file-choice">
+          <input type="checkbox" name="paths" value="{{ file.relative_path }}"
+                 {% if (submitted and file.relative_path in selected_paths) or (not submitted and file.selected) %}checked{% endif %}
+                 {% if not file.selectable %}disabled{% endif %}>
+          <code>{{ file.relative_path }}</code>
+          <small>
+            {{ '%.1f'|format(file.size / 1048576) }} MiB
+            {% if file.linked_asin == book.asin %} · bereits mit diesem Hörbuch verknüpft
+            {% elif file.linked_asin %} · verknüpft mit „{{ file.linked_title }}“
+            {% else %} · noch nicht verknüpft{% endif %}
+          </small>
+        </label>
+      {% else %}
+        <p class="empty">Keine passenden M4B-Dateien gefunden.</p>
+      {% endfor %}
+    </div>
+    {% if files|length >= 500 %}<p class="muted">Es werden höchstens 500 Treffer angezeigt. Über die Suche kann die Auswahl eingeschränkt werden.</p>{% endif %}
+    <label>
+      <span>Weitere Pfade, einer pro Zeile (optional)</span>
+      <textarea name="manual_paths" rows="4" placeholder="Autor/Titel/Titel.m4b">{{ manual_paths }}</textarea>
+    </label>
+    <p class="muted">Es sind relative Pfade unterhalb von <code>{{ audiobook_root }}</code> oder absolute Pfade innerhalb des Hörbuchverzeichnisses erlaubt.</p>
+    <button type="submit">Ausgewählte Dateien verknüpfen</button>
+  </form>
+{% endblock %}

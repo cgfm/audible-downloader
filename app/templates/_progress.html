@@ -1,0 +1,16 @@
+{% macro progress_bars(overall_percent, phase_label=None, phase_percent=None, estimated=False) -%}
+  <span class="job-progress">
+    <span class="progress-row">
+      <span class="progress-label">Gesamt</span>
+      <progress max="100" value="{{ overall_percent }}">{{ overall_percent }} %</progress>
+      <span>{% if estimated %}ca. {% endif %}{{ overall_percent }} %</span>
+    </span>
+    {% if phase_label and phase_percent is not none %}
+      <span class="progress-row">
+        <span class="progress-label">{{ phase_label }}</span>
+        <progress max="100" value="{{ phase_percent }}">{{ phase_percent }} %</progress>
+        <span>{{ phase_percent }} %</span>
+      </span>
+    {% endif %}
+  </span>
+{%- endmacro %}

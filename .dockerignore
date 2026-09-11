@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+**/__pycache__
+tests
+config
+audiobooks
+*.aax
+*.aaxc
+*.voucher
+*.m4b
+*.db
