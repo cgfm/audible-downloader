@@ -34,3 +34,41 @@ def test_search_covers_title_author_series_and_asin(service):
     assert [book["asin"] for book in service.list_books("Ada Autor")] == ["B012345678"]
     assert [book["asin"] for book in service.list_books("Meine Serie")] == ["B012345678"]
     assert [book["asin"] for book in service.list_books("B012345678")] == ["B012345678"]
+
+
+def test_complete_refresh_marks_missing_books_without_deleting_local_files(service):
+    service.sync_library_rows(
+        [{"asin": "B000000002", "title": "Zweites Buch", "authors": "Autor"}],
+        complete_snapshot=True,
+    )
+    local_file = service.config.audiobook_root / "keep.m4b"
+    local_file.write_bytes(b"audio")
+
+    service.sync_library_rows(
+        [{"asin": "B012345678", "title": "Der Titel", "authors": "Ada Autor"}],
+        complete_snapshot=True,
+    )
+
+    assert service.get_book("B000000002")["library_state"] == "removed"
+    assert service.get_book("B000000002")["removed_at"]
+    assert [book["asin"] for book in service.list_books(library_filter="active")] == [
+        "B012345678"
+    ]
+    assert [book["asin"] for book in service.list_books(library_filter="removed")] == [
+        "B000000002"
+    ]
+    assert local_file.read_bytes() == b"audio"
+
+
+def test_reappearing_book_is_reactivated(service):
+    service.sync_library_rows([], complete_snapshot=True)
+    assert service.get_book("B012345678")["library_state"] == "removed"
+
+    service.sync_library_rows(
+        [{"asin": "B012345678", "title": "Wieder da", "authors": "Ada Autor"}],
+        complete_snapshot=True,
+    )
+
+    book = service.get_book("B012345678")
+    assert book["library_state"] == "active"
+    assert book["removed_at"] is None

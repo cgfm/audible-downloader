@@ -39,6 +39,7 @@
       <h2>Vorhandene Dateien normalisieren</h2>
       <p>Verwendet die oben gespeicherten tatsächlichen Ausgabepfade. Multipart-Dateien werden nacheinander verarbeitet.</p>
       <form method="post" action="{{ url_for('normalize_book', asin=book.asin) }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <button type="submit" {% if status.key == 'running' %}disabled{% endif %}>Lautstärke normalisieren</button>
       </form>
     </section>
@@ -52,6 +53,7 @@
       <div class="notice warning"><strong>Achtung:</strong> Folgende Zieldatei ist bereits vorhanden: {{ existing_targets|join(', ') }}</div>
     {% endif %}
     <form method="post" class="conversion-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <label>
         <span>Zielpfad</span>
         <input type="text" name="target_path" value="{{ target_value }}" required>

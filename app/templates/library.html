@@ -4,9 +4,10 @@
   <div class="toolbar">
     <div>
       <h1>Bibliothek</h1>
-      <p class="muted">{{ books|length }} Hörbücher in dieser Ansicht</p>
+      <p class="muted">{{ total }} Hörbücher in dieser Ansicht</p>
     </div>
     <form method="post" action="{{ url_for('refresh_library') }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button type="submit">Bibliothek aktualisieren</button>
     </form>
   </div>
@@ -19,6 +20,14 @@
       <input type="search" name="q" value="{{ query }}" placeholder="Titel, Autor, Serie oder ASIN">
     </label>
     <label>
+      <span>Bibliothek</span>
+      <select name="library">
+        <option value="active" {% if library_filter == 'active' %}selected{% endif %}>Aktuell bei Audible</option>
+        <option value="removed" {% if library_filter == 'removed' %}selected{% endif %}>Entfernt/archiviert</option>
+        <option value="all" {% if library_filter == 'all' %}selected{% endif %}>Alle Titel</option>
+      </select>
+    </label>
+    <label>
       <span>Status</span>
       <select name="status">
         <option value="">Alle Status</option>
@@ -28,7 +37,7 @@
       </select>
     </label>
     <button type="submit">Filtern</button>
-    {% if query or status_filter %}<a class="button secondary" href="{{ url_for('library') }}">Zurücksetzen</a>{% endif %}
+    {% if query or status_filter or library_filter != 'active' %}<a class="button secondary" href="{{ url_for('library') }}">Zurücksetzen</a>{% endif %}
   </form>
 
   <div class="table-wrap">
@@ -55,7 +64,7 @@
                 <div class="cover placeholder" aria-label="Kein Cover">♪</div>
               {% endif %}
             </td>
-            <td><strong>{{ book.title }}</strong>{% if book.subtitle %}<small>{{ book.subtitle }}</small>{% endif %}</td>
+            <td><strong>{{ book.title }}</strong>{% if book.subtitle %}<small>{{ book.subtitle }}</small>{% endif %}{% if book.library_state == 'removed' %}<small class="muted">Nicht mehr im letzten Audible-Export</small>{% endif %}</td>
             <td>{{ book.authors }}</td>
             <td>{% if book.series_title %}{{ book.series_title }}{% if book.series_sequence %}<small>Band {{ book.series_sequence }}</small>{% endif %}{% else %}<span class="muted">–</span>{% endif %}</td>
             <td>{% if book.purchase_date %}<time datetime="{{ book.purchase_date }}">{{ book.purchase_date|purchase_date }}</time>{% else %}<span class="muted">–</span>{% endif %}</td>
@@ -77,4 +86,11 @@
       </tbody>
     </table>
   </div>
+  {% if page_count > 1 %}
+    <nav class="pagination" aria-label="Seitennavigation">
+      {% if page > 1 %}<a class="button secondary" href="{{ url_for('library', q=query or None, status=status_filter or None, library=library_filter, sort=sort_key, direction=sort_direction, page=page - 1) }}">Zurück</a>{% endif %}
+      <span>Seite {{ page }} von {{ page_count }}</span>
+      {% if page < page_count %}<a class="button secondary" href="{{ url_for('library', q=query or None, status=status_filter or None, library=library_filter, sort=sort_key, direction=sort_direction, page=page + 1) }}">Weiter</a>{% endif %}
+    </nav>
+  {% endif %}
 {% endblock %}

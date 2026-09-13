@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Audible anmelden – Audible Downloader{% endblock %}
+{% block refresh %}
+  {% if flow.status in ('starting', 'verifying') %}<meta http-equiv="refresh" content="2">{% endif %}
+  {% if flow.status == 'completed' %}<meta http-equiv="refresh" content="2;url={{ url_for('library') }}">{% endif %}
+{% endblock %}
+{% block content %}
+  <p><a href="{{ url_for('settings') }}">← Zu den Einstellungen</a></p>
+  <section class="panel auth-panel">
+    <h1>Audible anmelden</h1>
+    <p class="muted">Marktplatz: {{ flow.country_label }} (<code>{{ flow.country_code }}</code>)</p>
+
+    {% if flow.status == 'starting' %}
+      <div class="notice">Die sichere Amazon-Anmelde-URL wird vorbereitet …</div>
+    {% elif flow.status == 'waiting_for_login' %}
+      <ol class="auth-steps">
+        <li>
+          <strong>Amazon-Anmeldung öffnen</strong>
+          <p>Die Anmeldung findet direkt bei Amazon statt. Dieses Fenster geöffnet lassen.</p>
+          <a class="button" href="{{ flow.login_url }}" target="_blank" rel="noopener noreferrer">Bei Amazon anmelden</a>
+        </li>
+        <li>
+          <strong>Weiterleitungs-URL zurückkopieren</strong>
+          <p>Nach der Anmeldung erscheint erwartungsgemäß eine Amazon-Seite mit einer Fehlermeldung. Kopiere dann die <em>vollständige URL aus der Adresszeile</em> und füge sie hier ein.</p>
+          {% if form_error %}<div class="notice error">{{ form_error }}</div>{% endif %}
+          <form method="post" action="{{ url_for('submit_audible_authentication', flow_id=flow.flow_id) }}" class="conversion-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <label>
+              <span>Amazon-Weiterleitungs-URL</span>
+              <textarea name="callback_url" rows="4" autocomplete="off" spellcheck="false" required></textarea>
+            </label>
+            <button type="submit">Anmeldung abschließen</button>
+          </form>
+        </li>
+      </ol>
+    {% elif flow.status == 'verifying' %}
+      <div class="notice">Anmeldung wird geprüft und die Audible-Bibliothek wird gelesen …</div>
+      <p>Die bisherige Anmeldung bleibt bis zum erfolgreichen Abschluss erhalten.</p>
+    {% elif flow.status == 'completed' %}
+      <div class="notice success"><strong>Audible ist verbunden.</strong> Die Bibliothek wurde erfolgreich gelesen.</div>
+      {% if flow.error %}<div class="notice warning">{{ flow.error }}</div>{% endif %}
+      <p><a class="button" href="{{ url_for('library') }}">Zur Bibliothek</a></p>
+    {% elif flow.status == 'failed' %}
+      <div class="notice error"><strong>Anmeldung fehlgeschlagen.</strong> {{ flow.error }}</div>
+      <p><a class="button" href="{{ url_for('settings') }}">Erneut versuchen</a></p>
+    {% elif flow.status == 'cancelled' %}
+      <div class="notice warning">Die Anmeldung wurde abgebrochen.</div>
+      <p><a class="button" href="{{ url_for('settings') }}">Zurück zu den Einstellungen</a></p>
+    {% endif %}
+
+    {% if flow.status in ('starting', 'waiting_for_login') %}
+      <form method="post" action="{{ url_for('cancel_audible_authentication', flow_id=flow.flow_id) }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="secondary">Abbrechen</button>
+      </form>
+    {% endif %}
+  </section>
+{% endblock %}

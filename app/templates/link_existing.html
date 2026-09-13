@@ -15,6 +15,7 @@
 
   {% if form_error %}<div class="notice error">{{ form_error }}</div>{% endif %}
   <form method="post" class="conversion-form">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
     {% if query %}<input type="hidden" name="q" value="{{ query }}">{% endif %}
     <div class="file-picker">
       {% for file in files %}

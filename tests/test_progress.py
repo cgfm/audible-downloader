@@ -39,13 +39,14 @@ def test_ffmpeg_progress_uses_media_timestamp(monkeypatch, service):
         "stderr": subprocess.STDOUT,
         "text": True,
         "bufsize": 1,
+        "start_new_session": True,
     }
     assert progress == [0.25, 0.75, 1.0]
     assert result.returncode == 0
 
 
 def test_conversion_job_persists_monotonic_progress(monkeypatch, service):
-    def download(asin, work_directory, progress_callback=None):
+    def download(asin, work_directory, progress_callback=None, **kwargs):
         progress_callback(0.4)
         progress_callback(1.0)
         source = work_directory / f"{asin}.aax"

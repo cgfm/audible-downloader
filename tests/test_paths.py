@@ -1,3 +1,6 @@
+from pathlib import Path
+
+import pytest
 from audible_service import AudibleService, ServiceConfig
 
 
@@ -40,6 +43,15 @@ def test_standard_path_for_single_book(tmp_path):
     asin = add_book(service)
     assert relative(service, service.render_book_path(asin)) == (
         "Ada Autor/Der Titel/Der Titel.m4b"
+    )
+
+
+def test_application_default_templates_include_asin(service_factory):
+    service = service_factory()
+    add_book(service)
+
+    assert relative(service, service.render_book_path("B012345678")) == (
+        "Ada Autor/Der Titel/B012345678 - Der Titel.m4b"
     )
 
 
@@ -101,3 +113,63 @@ def test_missing_optional_metadata_does_not_break_rendering(tmp_path):
     )
     asin = add_book(service, subtitle="", narrators="", release_date="")
     assert relative(service, service.render_book_path(asin)) == "Ada Autor/Der Titel.m4b"
+
+
+def test_storage_roots_must_be_separate_and_must_not_use_filesystem_root(tmp_path):
+    with pytest.raises(ValueError, match="nicht überlappen"):
+        AudibleService(
+            ServiceConfig(
+                config_directory=tmp_path / "data",
+                audiobook_root=tmp_path / "data" / "books",
+                work_root=tmp_path / "work",
+            )
+        )
+    with pytest.raises(ValueError, match="Dateisystem-Root"):
+        AudibleService(
+            ServiceConfig(
+                config_directory=tmp_path / "config",
+                audiobook_root=tmp_path / "books",
+                work_root=Path(tmp_path.anchor),
+            )
+        )
+
+
+def test_metadata_path_components_are_bounded_by_utf8_bytes(tmp_path):
+    service = configured_service(tmp_path)
+    asin = add_book(service, title="Ä" * 500)
+
+    target = service.render_book_path(asin)
+
+    assert all(len(part.encode("utf-8")) <= 240 for part in target.parts)
+
+
+def test_untrusted_cover_hosts_are_not_persisted(service_factory):
+    service = service_factory()
+    service.sync_library_rows(
+        [
+            {
+                "asin": "B000000099",
+                "title": "Cover",
+                "authors": "Autor",
+                "cover_url": "https://tracking.example/cover.jpg",
+            }
+        ]
+    )
+
+    assert service.get_book("B000000099")["cover_url"] == ""
+
+
+def test_untrusted_legacy_cover_is_scrubbed_on_restart(service_factory):
+    service = service_factory()
+    service.sync_library_rows(
+        [{"asin": "B000000098", "title": "Alt", "authors": "Autor"}]
+    )
+    with service._connect() as connection:
+        connection.execute(
+            "UPDATE audiobooks SET cover_url=? WHERE asin=?",
+            ("https://tracking.example/legacy.jpg", "B000000098"),
+        )
+
+    restarted = service_factory()
+
+    assert restarted.get_book("B000000098")["cover_url"] == ""

@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from audible_service import ServiceConfig
+from audible_service import ProcessingError, ServiceConfig
 from conftest import install_success_pipeline
 
 MEASURED = {
@@ -35,15 +35,18 @@ def test_normal_conversion_keeps_stream_copy_path(monkeypatch, service):
 
     def fake_run(command, check=True, **kwargs):
         commands.append(command)
-        destination.write_bytes(b"m4b")
+        Path(command[-1]).write_bytes(b"m4b")
 
     monkeypatch.setattr("audible_service.subprocess.run", fake_run)
+    monkeypatch.setattr(service, "_validate_media_output", lambda path: None)
     service._convert_file(source, destination)
 
-    assert commands == [[
-        "ffmpeg", "-n", "-activation_bytes", "deadbeef", "-i", str(source),
-        "-c", "copy", str(destination),
-    ]]
+    assert commands[0][0:8] == [
+        "ffmpeg", "-y", "-activation_bytes", "deadbeef", "-i", str(source),
+        "-c", "copy",
+    ]
+    assert ".audible-convert-" in commands[0][-1]
+    assert destination.read_bytes() == b"m4b"
     assert "loudnorm" not in " ".join(commands[0])
 
 
@@ -66,7 +69,13 @@ def test_new_conversion_with_normalization_uses_normalized_branch(monkeypatch, s
     result = service.process_book("B012345678", normalize=True)
 
     assert result.successful
-    assert calls == [{"overwrite": False, "normalize": True}]
+    assert calls == [
+        {
+            "overwrite": False,
+            "normalize": True,
+            "owner_asin": "B012345678",
+        }
+    ]
     assert service.book_status("B012345678")["normalization"]["key"] == "normalized"
 
 
@@ -181,7 +190,7 @@ def test_source_is_unchanged_when_ffmpeg_fails(monkeypatch, service):
         raise subprocess.CalledProcessError(1, args[0])
 
     monkeypatch.setattr("audible_service.subprocess.run", fail)
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(ProcessingError, match="FFmpeg fehlgeschlagen"):
         service.normalize_existing_file(source)
 
     assert source.read_bytes() == original
@@ -230,6 +239,72 @@ def test_startup_removes_interrupted_normalization_temporary(service_factory):
     assert service.cleanup_normalization_temporaries() == 1
     assert not temporary.exists()
     assert unrelated.exists()
+
+
+def test_single_file_conversion_publishes_only_after_validation(monkeypatch, service):
+    source = service.config.work_root / "book.aax"
+    source.write_bytes(b"encrypted")
+    destination = service.config.audiobook_root / "book.m4b"
+    destination.write_bytes(b"original")
+    monkeypatch.setattr(service, "_activation_bytes", lambda: "deadbeef")
+    events = []
+
+    def run(command, duration, progress_callback):
+        Path(command[-1]).write_bytes(b"complete")
+        events.append("converted")
+        return subprocess.CompletedProcess(command, 0)
+
+    def validate(path):
+        assert destination.read_bytes() == b"original"
+        assert path.read_bytes() == b"complete"
+        events.append("validated")
+
+    monkeypatch.setattr(service, "_run_ffmpeg_with_progress", run)
+    monkeypatch.setattr(service, "_validate_media_output", validate)
+
+    service._convert_file(source, destination, overwrite=True)
+
+    assert events == ["converted", "validated"]
+    assert destination.read_bytes() == b"complete"
+    assert not source.exists()
+
+
+def test_single_file_publish_failure_preserves_original_and_input(
+    monkeypatch, service
+):
+    source = service.config.work_root / "book.aax"
+    source.write_bytes(b"encrypted")
+    destination = service.config.audiobook_root / "book.m4b"
+    destination.write_bytes(b"original")
+    monkeypatch.setattr(service, "_activation_bytes", lambda: "deadbeef")
+
+    def run(command, duration, progress_callback):
+        Path(command[-1]).write_bytes(b"complete")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(service, "_run_ffmpeg_with_progress", run)
+    monkeypatch.setattr(service, "_validate_media_output", lambda path: None)
+    monkeypatch.setattr(
+        "audible_service.os.replace",
+        lambda *args: (_ for _ in ()).throw(OSError("publish failed")),
+    )
+
+    with pytest.raises(OSError, match="publish failed"):
+        service._convert_file(source, destination, overwrite=True)
+
+    assert destination.read_bytes() == b"original"
+    assert source.read_bytes() == b"encrypted"
+    assert list(destination.parent.glob(".*.audible-convert-*.tmp.m4b")) == []
+
+
+def test_startup_removes_interrupted_conversion_temporary(service_factory):
+    service = service_factory()
+    temporary = service.config.audiobook_root / ".book.audible-convert-dead.tmp.m4b"
+    temporary.write_bytes(b"partial")
+
+    service_factory()
+
+    assert not temporary.exists()
 
 
 def test_multipart_normalization_processes_all_parts_in_order(monkeypatch, service):

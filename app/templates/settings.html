@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen – Audible Downloader{% endblock %}
+{% block content %}
+  <div class="toolbar">
+    <div>
+      <h1>Einstellungen</h1>
+      <p class="muted">Audible-Verbindung und Zugriffsschutz</p>
+    </div>
+    {% if auth_status.connected %}<a class="button secondary" href="{{ url_for('library') }}">Zur Bibliothek</a>{% endif %}
+  </div>
+
+  {% if not web_auth_enabled %}
+    <div class="notice warning">
+      <strong>Kein eigener Web-Zugriffsschutz aktiv.</strong>
+      Setze <code>WEB_ADMIN_PASSWORD</code> oder konfiguriere den expliziten Proxy-Modus.
+    </div>
+  {% endif %}
+
+  <section class="panel auth-panel">
+    <div class="connection-heading">
+      <div>
+        <h2>Audible-Konto</h2>
+        <p class="muted">Amazon-Zugangsdaten und 2FA werden ausschließlich auf der Amazon-Seite eingegeben.</p>
+      </div>
+      <span class="status {{ auth_status.state }}">{{ auth_status.label }}</span>
+    </div>
+
+    {% if auth_status.connected %}
+      <dl>
+        <dt>Marktplatz</dt><dd>{{ auth_status.country_label }} (<code>{{ auth_status.country_code }}</code>)</dd>
+        <dt>Profil</dt><dd><code>{{ auth_status.profile }}</code></dd>
+        <dt>Auth-Datei</dt><dd><code>{{ auth_status.auth_file }}</code></dd>
+        <dt>Kontotyp</dt><dd>{{ 'Altes Audible-Konto' if auth_status.with_username else 'Amazon-Konto' }}</dd>
+      </dl>
+    {% elif auth_status.error %}
+      <div class="notice error">{{ auth_status.error }}</div>
+    {% else %}
+      <p>Verbinde einmalig dein Audible-Konto. Danach kann die Anwendung deine Bibliothek synchronisieren und erworbene Titel herunterladen.</p>
+    {% endif %}
+
+    {% if active_flow %}
+      <div class="notice">
+        Eine Anmeldung läuft bereits.
+        <a href="{{ url_for('audible_authentication', flow_id=active_flow.flow_id) }}">Anmeldung fortsetzen</a>
+      </div>
+    {% else %}
+      <form method="post" action="{{ url_for('start_audible_authentication') }}" class="conversion-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        {% if not auth_status.connected %}
+          <label>
+            <span>Audible-Marktplatz</span>
+            <select name="country_code">
+              {% for code, label in marketplaces.items() %}
+                <option value="{{ code }}" {% if code == selected_country %}selected{% endif %}>{{ label }} ({{ code }})</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="with_username" value="1">
+            Altes Audible-Konto ohne Amazon-Anmeldung verwenden (nur DE, US und UK)
+          </label>
+        {% endif %}
+        <button type="submit">{{ 'Erneut authentifizieren' if auth_status.connected else 'Audible verbinden' }}</button>
+      </form>
+    {% endif %}
+
+    {% if auth_status.connected %}
+      <form method="post" action="{{ url_for('test_audible_authentication') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="secondary">Verbindung testen</button>
+      </form>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Anwendung</h2>
+    <p class="muted">
+      Diese Werte werden in der Datenbank gespeichert. Eine gesetzte
+      Umgebungsvariable hat Vorrang und sperrt das zugehörige Feld.
+    </p>
+    <form method="post" action="{{ url_for('update_application_settings') }}" class="settings-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+
+      {% set setting = application_settings.auto_download_from_date %}
+      <label>
+        <span>Automatische Downloads ab Kaufdatum</span>
+        <input type="date" name="auto_download_from_date" value="{{ setting.value }}" required {% if setting.environment_locked %}disabled{% endif %}>
+        <small>Titel mit diesem oder einem späteren Kaufdatum werden automatisch verarbeitet. Ohne Kaufdatum erfolgt kein automatischer Download.</small>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      {% set setting = application_settings.audiobook_folders %}
+      <label>
+        <span>Hörbuchordner verwenden</span>
+        <select name="audiobook_folders" {% if setting.environment_locked %}disabled{% endif %}>
+          <option value="True" {% if setting.value == 'True' %}selected{% endif %}>Ja</option>
+          <option value="False" {% if setting.value == 'False' %}selected{% endif %}>Nein</option>
+        </select>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      {% set setting = application_settings.single_book_path_template %}
+      <label>
+        <span>Pfad-Template für Einzelbücher</span>
+        <input type="text" name="single_book_path_template" value="{{ setting.value }}" required {% if setting.environment_locked %}disabled{% endif %}>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      {% set setting = application_settings.series_book_path_template %}
+      <label>
+        <span>Pfad-Template für Serienbücher</span>
+        <input type="text" name="series_book_path_template" value="{{ setting.value }}" required {% if setting.environment_locked %}disabled{% endif %}>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      {% set setting = application_settings.auto_process_enabled %}
+      <label>
+        <span>Automatische Verarbeitung</span>
+        <select name="auto_process_enabled" {% if setting.environment_locked %}disabled{% endif %}>
+          <option value="True" {% if setting.value == 'True' %}selected{% endif %}>Aktiviert</option>
+          <option value="False" {% if setting.value == 'False' %}selected{% endif %}>Deaktiviert</option>
+        </select>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      {% set setting = application_settings.auto_process_interval %}
+      <label>
+        <span>Automatikintervall in Sekunden</span>
+        <input type="number" name="auto_process_interval" value="{{ setting.value }}" min="60" step="1" required {% if setting.environment_locked %}disabled{% endif %}>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      {% set setting = application_settings.log_level %}
+      <label>
+        <span>Log-Level</span>
+        <select name="log_level" {% if setting.environment_locked %}disabled{% endif %}>
+          {% for level in ('DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL') %}
+            <option value="{{ level }}" {% if setting.value == level %}selected{% endif %}>{{ level }}</option>
+          {% endfor %}
+        </select>
+        {% if setting.environment_locked %}<small class="setting-source">Durch <code>{{ setting.environment_name }}</code> festgelegt.</small>{% endif %}
+      </label>
+
+      <button type="submit">Anwendungseinstellungen speichern</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Betrieb</h2>
+    <dl>
+      <dt>Automatische Verarbeitung</dt><dd>{{ 'Pausiert' if operational.automatic_paused else 'Aktiv' }}</dd>
+      <dt>Letzter automatischer Lauf</dt><dd>{{ operational.last_finished_at or 'Noch nicht ausgeführt' }}</dd>
+      <dt>Ergebnis</dt><dd>{{ operational.last_status or '–' }}{% if operational.last_detail %}<small>{{ operational.last_detail }}</small>{% endif %}</dd>
+    </dl>
+    <form method="post" action="{{ url_for('set_automatic_processing') }}" class="inline-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="paused" value="{{ '0' if operational.automatic_paused else '1' }}">
+      <button type="submit" class="secondary">{{ 'Automatik fortsetzen' if operational.automatic_paused else 'Automatik pausieren' }}</button>
+    </form>
+    <form method="post" action="{{ url_for('backup_database') }}" class="inline-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="secondary">Datenbank jetzt sichern</button>
+    </form>
+  </section>
+{% endblock %}

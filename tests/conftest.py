@@ -1,4 +1,5 @@
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -6,7 +7,7 @@ import pytest
 APP_DIRECTORY = Path(__file__).resolve().parents[1] / "app"
 sys.path.insert(0, str(APP_DIRECTORY))
 
-from audible_service import AudibleService, ServiceConfig
+from audible_service import AudibleService, ServiceConfig  # noqa: E402
 
 
 @pytest.fixture
@@ -38,6 +39,7 @@ def service(service_factory):
                 "series_sequence": "1",
                 "narrators": "Nora Erzählerin",
                 "release_date": "2025-04-03",
+                "purchase_date": datetime.now(UTC).date().isoformat(),
             }
         ]
     )
@@ -47,7 +49,7 @@ def service(service_factory):
 def install_success_pipeline(monkeypatch, service, parts=1):
     calls = []
 
-    def download(asin, work_directory):
+    def download(asin, work_directory, **kwargs):
         sources = []
         for number in range(1, parts + 1):
             source = work_directory / f"{asin}_part{number}.aax"
@@ -56,7 +58,7 @@ def install_success_pipeline(monkeypatch, service, parts=1):
         calls.append(("download", asin))
         return sources
 
-    def convert(source, destination, overwrite=False):
+    def convert(source, destination, overwrite=False, **kwargs):
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(f"converted:{source.name}".encode())
         source.unlink()

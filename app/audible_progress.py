@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from audible_cli import downloader
 
-
 PROGRESS_PREFIX = "AUDIBLE_DOWNLOAD_PROGRESS="
 
 

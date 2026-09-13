@@ -1,5 +1,7 @@
 import json
 import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
 
 from conftest import install_success_pipeline
 
@@ -71,7 +73,7 @@ def test_multipart_download_is_merged_and_one_output_is_persisted(monkeypatch, s
     calls = install_success_pipeline(monkeypatch, service, parts=2)
     result = service.process_book("B012345678")
     assert result.outputs == (
-        "Ada Autor/Meine Serie/Band 1 - Der Titel/Der Titel.m4b",
+        "Ada Autor/Meine Serie/Band 1 - Der Titel/B012345678 - Der Titel.m4b",
     )
     assert [call[0] for call in calls] == ["download", "convert", "convert", "merge"]
     with service._connect() as connection:
@@ -206,14 +208,89 @@ def test_aaxc_conversion_uses_voucher_with_same_basename(monkeypatch, service):
 
     def fake_run(command, check=True, **kwargs):
         commands.append(command)
-        destination.write_bytes(b"converted")
+        Path(command[-1]).write_bytes(b"converted")
 
     monkeypatch.setattr("audible_service.subprocess.run", fake_run)
+    monkeypatch.setattr(service, "_validate_media_output", lambda path: None)
     service._convert_file(source, destination)
 
     assert "exact-key" in commands[0]
     assert "exact-iv" in commands[0]
     assert not source.with_suffix(".voucher").exists()
+
+
+def test_foreign_owned_target_cannot_be_enqueued_with_overwrite(service):
+    target = service.config.audiobook_root / "shared.m4b"
+    target.write_bytes(b"book-a")
+    assert service.link_existing_outputs("B012345678", [target]).successful
+    service.sync_library_rows(
+        [{"asin": "B000000002", "title": "Buch B", "authors": "Autor"}]
+    )
+
+    queued = service.enqueue_conversion(
+        "B000000002", target_path=target, overwrite=True
+    )
+
+    assert queued.created is False
+    assert queued.status == "failed"
+    assert "gehört bereits" in queued.error
+    assert target.read_bytes() == b"book-a"
+
+
+def test_target_claim_migration_blocks_foreign_owner(service_factory):
+    service = service_factory()
+    service.sync_library_rows(
+        [
+            {"asin": "B000000001", "title": "Buch A", "authors": "Autor"},
+            {"asin": "B000000002", "title": "Buch B", "authors": "Autor"},
+        ]
+    )
+    target = service.config.audiobook_root / "historical.m4b"
+    target.write_bytes(b"book-a")
+    run_id = service._create_run(
+        "B000000001", target, False, False, False, "migration-test"
+    )
+    service._record_output(run_id, target, None)
+    service._finish_run(run_id, "success")
+    with service._connect() as connection:
+        connection.execute("DROP TABLE target_path_claims")
+
+    migrated = service_factory()
+    with migrated._connect() as connection:
+        claim = connection.execute(
+            "SELECT asin, state FROM target_path_claims WHERE relative_path=?",
+            (migrated.relative_output_path(target),),
+        ).fetchone()
+    queued = migrated.enqueue_conversion(
+        "B000000002", target_path=target, overwrite=True
+    )
+
+    assert dict(claim) == {"asin": "B000000001", "state": "published"}
+    assert queued.created is False
+    assert "gehört bereits" in queued.error
+    assert target.read_bytes() == b"book-a"
+
+
+def test_automatic_path_collision_gets_asin_suffix(service_factory):
+    service = service_factory(
+        use_folders=True,
+        single_book_path_template="{author}/{title}/{title}.m4b",
+    )
+    service.sync_library_rows(
+        [
+            {"asin": "B000000001", "title": "Gleich", "authors": "Autor"},
+            {"asin": "B000000002", "title": "Gleich", "authors": "Autor"},
+        ]
+    )
+    first = service.enqueue_conversion("B000000001")
+    second = service.enqueue_conversion("B000000002")
+
+    assert first.created and second.created
+    jobs = {job["asin"]: job for job in service.list_jobs()}
+    assert jobs["B000000001"]["requested_target_path"] == "Autor/Gleich/Gleich.m4b"
+    assert jobs["B000000002"]["requested_target_path"] == (
+        "Autor/Gleich/Gleich [B000000002].m4b"
+    )
 
 
 def test_legacy_database_is_migrated_without_losing_downloaded(tmp_path):
@@ -242,8 +319,15 @@ def test_legacy_database_is_migrated_without_losing_downloaded(tmp_path):
             use_folders=True,
         )
     )
-    assert service.get_book("B012345678")["downloaded"] == 1
+    migrated = service.get_book("B012345678")
+    assert migrated["downloaded"] == 1
+    assert migrated["library_state"] == "active"
+    assert "last_seen_at" in migrated
+    assert service.config.auto_download_from_date == datetime.now(UTC).date().isoformat()
     assert service.book_status("B012345678")["key"] == "history"
+    backups = list((config / "backups").glob("audiobooks-startup-*.db"))
+    assert len(backups) == 1
+    assert backups[0].stat().st_mode & 0o777 == 0o600
 
 
 def test_legacy_output_is_imported_with_its_actual_path(service):

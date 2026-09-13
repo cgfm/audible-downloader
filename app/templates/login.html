@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Anmeldung – Audible Downloader{% endblock %}
+{% block content %}
+  <section class="panel login-panel">
+    <h1>Anmeldung</h1>
+    <p class="muted">Melde dich an, um den Audible Downloader zu verwenden.</p>
+
+    {% if form_error %}
+      <div class="notice error" role="alert">{{ form_error }}</div>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('web_login') }}" class="login-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <label>
+        <span>Benutzername</span>
+        <input type="text" name="username" value="{{ submitted_username }}" autocomplete="username" required autofocus>
+      </label>
+      <label>
+        <span>Passwort</span>
+        <input type="password" name="password" autocomplete="current-password" required>
+      </label>
+      <button type="submit">Anmelden</button>
+    </form>
+  </section>
+{% endblock %}

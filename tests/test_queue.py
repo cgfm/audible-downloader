@@ -1,7 +1,11 @@
 import json
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+
+from audible_service import ProcessTimedOut
 
 
 def add_book(service, asin, title):
@@ -11,7 +15,7 @@ def add_book(service, asin, title):
 def install_queue_pipeline(monkeypatch, service, fail_asin=None, events=None):
     events = events if events is not None else []
 
-    def download(asin, work_directory, progress_callback=None):
+    def download(asin, work_directory, progress_callback=None, **kwargs):
         if progress_callback:
             progress_callback(1.0)
         events.append(("download", asin))
@@ -229,7 +233,7 @@ def test_at_most_one_download_runs_at_a_time(monkeypatch, service):
     active = 0
     maximum = 0
 
-    def download(asin, work_directory, progress_callback=None):
+    def download(asin, work_directory, progress_callback=None, **kwargs):
         nonlocal active, maximum
         with guard:
             active += 1
@@ -290,7 +294,7 @@ def test_download_can_overlap_media_processing_of_another_job(monkeypatch, servi
     release_second_download = threading.Event()
     overlap_observed = threading.Event()
 
-    def download(asin, work_directory, progress_callback=None):
+    def download(asin, work_directory, progress_callback=None, **kwargs):
         source = work_directory / f"{asin}.aax"
         source.write_bytes(b"source")
         if asin == "B000000002":
@@ -336,3 +340,195 @@ def test_process_pending_uses_persistent_queue(service):
     assert len(results) == 1
     assert results[0].created
     assert service.list_jobs()[0]["status"] == "queued"
+
+
+def test_process_pending_filters_books_before_purchase_cutoff(service_factory):
+    service = service_factory()
+    cutoff = datetime.now(UTC).date()
+    service.sync_library_rows(
+        [
+            {
+                "asin": "B000000001",
+                "title": "Alt",
+                "authors": "Autor",
+                "purchase_date": (cutoff - timedelta(days=1)).isoformat(),
+            },
+            {
+                "asin": "B000000002",
+                "title": "Grenztag",
+                "authors": "Autor",
+                "purchase_date": cutoff.isoformat(),
+            },
+            {
+                "asin": "B000000003",
+                "title": "Neu",
+                "authors": "Autor",
+                "purchase_date": (cutoff + timedelta(days=1)).isoformat(),
+            },
+            {
+                "asin": "B000000004",
+                "title": "Ohne Datum",
+                "authors": "Autor",
+            },
+        ]
+    )
+
+    results = service.process_pending()
+
+    assert [result.created for result in results] == [True, True]
+    assert {job["asin"] for job in service.list_jobs()} == {
+        "B000000002",
+        "B000000003",
+    }
+    assert service.enqueue_conversion("B000000001", trigger="web").created is True
+
+
+def test_moving_cutoff_cancels_only_queued_automatic_old_books(service_factory):
+    service = service_factory()
+    service.update_application_settings({"auto_download_from_date": "2020-01-01"})
+    service.sync_library_rows(
+        [
+            {
+                "asin": "B000000001",
+                "title": "Automatisch alt",
+                "authors": "Autor",
+                "purchase_date": "2021-01-01",
+            },
+            {
+                "asin": "B000000002",
+                "title": "Manuell alt",
+                "authors": "Autor",
+                "purchase_date": "2021-01-01",
+            },
+        ]
+    )
+    manual = service.enqueue_conversion("B000000002", trigger="web")
+    automatic = next(result for result in service.process_pending() if result.created)
+
+    service.update_application_settings({"auto_download_from_date": "2026-01-01"})
+
+    jobs = {job["id"]: job for job in service.list_jobs()}
+    assert jobs[automatic.job_id]["status"] == "cancelled"
+    assert jobs[manual.job_id]["status"] == "queued"
+
+
+def test_active_job_cancel_requests_termination_and_finishes_cancelled(service):
+    queued = service.enqueue_conversion("B012345678")
+    job = service._claim_job("queued", "downloading", "Download")
+
+    class FakeProcess:
+        pid = None
+        terminated = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return 0
+
+    process = FakeProcess()
+    service._active_processes[job["id"]] = process
+
+    assert service.cancel_job(queued.job_id) is True
+    assert process.terminated is True
+    with service._connect() as connection:
+        assert connection.execute(
+            "SELECT cancel_requested FROM jobs WHERE id=?", (queued.job_id,)
+        ).fetchone()[0] == 1
+
+    service._finish_job(job, "cancelled", "Job wurde abgebrochen")
+    assert service.list_jobs()[0]["status"] == "cancelled"
+
+
+def test_cancel_requested_as_download_finishes_does_not_leave_waiting_job(
+    monkeypatch, service
+):
+    queued = service.enqueue_conversion("B012345678")
+
+    def download(asin, work_directory, **kwargs):
+        source = work_directory / f"{asin}.aax"
+        source.write_bytes(b"source")
+        assert service.cancel_job(queued.job_id)
+        return [source]
+
+    monkeypatch.setattr(service, "_download_audio", download)
+
+    assert service.run_next_download_job()
+    assert service.list_jobs()[0]["status"] == "cancelled"
+    assert not (
+        service.config.work_root / "jobs" / f"{queued.job_id}-B012345678"
+    ).exists()
+
+
+def test_temporary_download_failure_is_retried_with_backoff(monkeypatch, service):
+    object.__setattr__(service.config, "retry_base_seconds", 7)
+    monkeypatch.setattr(
+        service,
+        "_download_audio",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ProcessTimedOut("Netzwerk-Zeitlimit")
+        ),
+    )
+    queued = service.enqueue_conversion("B012345678")
+
+    assert service.run_next_download_job()
+    with service._connect() as connection:
+        job = connection.execute(
+            "SELECT * FROM jobs WHERE id=?", (queued.job_id,)
+        ).fetchone()
+    assert job["status"] == "queued"
+    assert job["attempt_count"] == 1
+    assert job["next_attempt_at"]
+    assert job["current_step"] == "Wiederholung in 7 Sekunden"
+    assert service.run_next_download_job() is False
+
+
+def test_manual_retry_copies_failed_job_options(monkeypatch, service):
+    queued = service.enqueue_conversion(
+        "B012345678", force=True, overwrite=True, normalize=True
+    )
+    job = service._claim_job("queued", "downloading", "Download")
+    service._finish_job(job, "failed", "permanent")
+
+    retried = service.retry_job(queued.job_id)
+
+    assert retried.created is True
+    retried_job = next(
+        job for job in service.list_jobs() if job["id"] == retried.job_id
+    )
+    assert retried_job["force"] == 1
+    assert retried_job["overwrite"] == 1
+    assert retried_job["normalize"] == 1
+
+
+def test_low_disk_space_fails_before_download(monkeypatch, service):
+    monkeypatch.setattr(
+        "audible_service.shutil.disk_usage",
+        lambda path: SimpleNamespace(free=1),
+    )
+    monkeypatch.setattr(
+        service,
+        "_download_audio",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("download must not start")
+        ),
+    )
+    queued = service.enqueue_conversion("B012345678")
+
+    assert service.run_next_download_job()
+
+    job = next(job for job in service.list_jobs() if job["id"] == queued.job_id)
+    assert job["status"] == "failed"
+    assert "Zu wenig freier Speicherplatz" in job["error_message"]
+
+
+def test_download_larger_than_configured_limit_is_rejected(monkeypatch, service):
+    object.__setattr__(service.config, "max_input_bytes", 4)
+    install_queue_pipeline(monkeypatch, service)
+    service.enqueue_conversion("B012345678")
+
+    assert service.run_next_download_job()
+
+    job = service.list_jobs()[0]
+    assert job["status"] == "failed"
+    assert "maximale Eingabegröße" in job["error_message"]

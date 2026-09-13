@@ -10,7 +10,18 @@
   <body>
     <header class="site-header">
       <a href="{{ url_for('library') }}">Audible Downloader</a>
-      <nav><a href="{{ url_for('jobs') }}">Jobs</a></nav>
+      {% if config.AUTH_MODE != 'form' or session.get('web_auth_token') %}
+        <nav>
+          <a href="{{ url_for('jobs') }}">Jobs</a>
+          <a href="{{ url_for('settings') }}">Einstellungen</a>
+          {% if config.AUTH_MODE == 'form' %}
+            <form method="post" action="{{ url_for('web_logout') }}" class="logout-form">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+              <button type="submit">Abmelden</button>
+            </form>
+          {% endif %}
+        </nav>
+      {% endif %}
     </header>
     <main>
       {% with messages = get_flashed_messages(with_categories=true) %}

@@ -26,10 +26,13 @@
             <td>{{ progress_bars(job.progress_percent, job.phase_label, job.phase_progress_percent, job.status in ('queued', 'downloading', 'waiting_for_processing', 'processing')) }}</td>
             <td><time datetime="{{ job.created_at }}">{{ job.created_at }}</time></td>
             <td>
-              {% if job.status in ('queued', 'waiting_for_processing') %}
-                <form method="post" action="{{ url_for('cancel_job', job_id=job.id) }}"><button type="submit" class="secondary">Abbrechen</button></form>
-              {% elif job.status in ('completed', 'failed', 'cancelled') %}
-                <form method="post" action="{{ url_for('dismiss_job', job_id=job.id) }}"><button type="submit" class="secondary">Entfernen</button></form>
+              {% if job.status in ('queued', 'downloading', 'waiting_for_processing', 'processing') %}
+                <form method="post" action="{{ url_for('cancel_job', job_id=job.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary">Abbrechen</button></form>
+              {% elif job.status in ('failed', 'cancelled') %}
+                <form method="post" action="{{ url_for('retry_job', job_id=job.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit">Wiederholen</button></form>
+                <form method="post" action="{{ url_for('dismiss_job', job_id=job.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary">Entfernen</button></form>
+              {% elif job.status == 'completed' %}
+                <form method="post" action="{{ url_for('dismiss_job', job_id=job.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit" class="secondary">Entfernen</button></form>
               {% endif %}
             </td>
           </tr>
