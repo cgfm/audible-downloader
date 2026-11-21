@@ -2,24 +2,24 @@ ARG PYTHON_BASE="python:3.12.13-slim-trixie@sha256:229a2c5bfa27522db7815ea81f9be
 
 FROM ${PYTHON_BASE} AS dependencies
 
-COPY requirements.lock /tmp/requirements.lock
+COPY requirements.txt /tmp/requirements.txt
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/python -m pip install \
         --disable-pip-version-check \
         --no-cache-dir \
         --require-hashes \
-        --requirement /tmp/requirements.lock \
+        --requirement /tmp/requirements.txt \
     && rm -rf /opt/venv/lib/python3.12/site-packages/pip* \
         /opt/venv/bin/pip*
 
 FROM ${PYTHON_BASE} AS test
 
-COPY requirements-dev.lock /tmp/requirements-dev.lock
+COPY requirements-dev.txt /tmp/requirements-dev.txt
 RUN python -m pip install \
         --disable-pip-version-check \
         --no-cache-dir \
         --require-hashes \
-        --requirement /tmp/requirements-dev.lock
+        --requirement /tmp/requirements-dev.txt
 COPY ruff.toml /src/ruff.toml
 COPY app/ /src/app/
 COPY tests/ /src/tests/
