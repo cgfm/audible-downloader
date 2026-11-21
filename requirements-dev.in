@@ -1,7 +1,7 @@
 -r requirements.in
 bandit==1.9.4
 pip-audit==2.10.1
-pytest==9.0.3
+pytest==9.2.0
 ruff==0.16.7
 
 # Minimum versions for the development dependencies flagged by pip-audit.
