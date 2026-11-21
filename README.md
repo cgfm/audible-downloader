@@ -438,13 +438,23 @@ python3 -m pytest -q
 python3 -m compileall -q app tests
 ruff check app tests
 bandit -q -r app -ll
-pip-audit -r requirements.lock
+pip-audit -r requirements.txt
+pip-audit -r requirements-dev.txt
 ```
 
 Production and development dependencies are fully pinned with hashes in
-`requirements.lock` and `requirements-dev.lock`. CI runs syntax, lint, tests,
-dependency audit, a cache-independent image build, and a High/Critical Trivy
-gate; Dependabot proposes weekly lock/base-image/action updates.
+`requirements.txt` and `requirements-dev.txt`. Regenerate both with Python 3.12
+and pip-tools after changing the input manifests:
+
+```sh
+pip-compile --generate-hashes --no-emit-index-url --strip-extras requirements.in
+pip-compile --generate-hashes --no-emit-index-url --strip-extras requirements-dev.in
+```
+
+CI and Dependabot use `.python-version` to select the Python version. CI checks
+syntax, lint, tests, and dependency advisories. It also builds the image without
+cache and scans it with Trivy for High and Critical vulnerabilities. Dependabot
+proposes weekly updates for Python dependencies, the base image, and actions.
 
 The service and database decisions are described in `ARCHITECTURE.md`.
 
